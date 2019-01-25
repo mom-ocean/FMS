@@ -185,6 +185,14 @@
 !ug support
                          domain_ug)
 !----------
+
+      use mpp_mod, only: mpp_alltoall, mpp_declare_pelist
+      use mpp_mod, only: mpp_declare_pelist_id, mpp_set_current_pelist
+      use mpp_mod, only: mpp_get_current_pelist_name, mpp_get_current_pelist
+
+ 
+
+
       integer,         intent(out)           :: unit   
       character(len=*), intent(in)           :: file
       integer,          intent(in), optional :: action, form, access 
@@ -203,6 +211,8 @@
       character(len=256) :: text2
       integer :: action_flag, form_flag, access_flag, threading_flag, fileset_flag, length
       integer :: nfiles, tile_id(1), io_layout(2)
+      integer :: niopes, totiopes
+
       logical :: exists, on_root_pe, dist_file
       logical :: write_on_this_pe, read_on_this_pe, io_domain_exist
       integer :: ios, nc_pos     !position of .nc in file name
@@ -217,6 +227,8 @@
 !----------
       integer*8                             :: lenp
       integer                               :: comm
+      integer                               :: rdinfo, wrinfo, mode, omode, idx
+
       integer                               :: info, ierror
       integer,dimension(:), allocatable     :: glist(:)  
       integer                               ::lena, lenb
@@ -225,6 +237,9 @@
       integer                               ::f_size, f_stat
       integer                               ::fsize, inital = 0
       character(len=128)                    :: f_test
+
+      integer, dimension(:), allocatable    :: iowridx, iope, iopelist, n
+      integer                               :: cur_iocomm, current_peset_num
       
 !----------
 !ug support
@@ -241,6 +256,8 @@
 !----------
      
       call mpp_clock_begin(mpp_open_clock)
+      totiopes = mpp_npes()
+
       if( .NOT.module_is_initialized )call mpp_error( FATAL, 'MPP_OPEN: must first call mpp_io_init.' )
       on_root_pe = mpp_pe() == mpp_root_pe()
       if(present(is_root_pe)) on_root_pe = is_root_pe
@@ -254,6 +271,10 @@
 #ifndef use_netCDF
       if( form_flag.EQ.MPP_NETCDF ) &
            call mpp_error( FATAL, 'MPP_OPEN: To open a file with form=MPP_NETCDF, you must compile mpp_io with -Duse_netCDF.' )
+
+      if (parallel_netcdf) &
+           call mpp_error(FATAL, 'MPP_OPEN: To use parallel netCDF, you ' &
+                                 'must compile mpp_io with -Duse_netCDF.' )
 #endif     
       access_flag = MPP_SEQUENTIAL
       if( PRESENT(access) )access_flag = access
@@ -263,11 +284,21 @@
       if( PRESENT(fileset) )fileset_flag = fileset
       if( threading_flag.EQ.MPP_SINGLE )fileset_flag = MPP_SINGLE
 
+      if (parallel_netcdf) then
+         threading_flag = MPP_MULTI
+         fileset_flag = MPP_SINGLE
+      end if
+
       io_domain_exist = .false.
       if( PRESENT(domain) ) then
          io_domain => mpp_get_io_domain(domain)
          if(associated(io_domain)) io_domain_exist = .true.
 
+         if (parallel_netcdf) then
+             npes = mpp_npes()
+             allocate(iowridx(0:npes-1))
+             allocate(iope(0:npes-1))
+         endif
 !----------
 !ug support
       elseif (present(domain_ug)) then
@@ -283,19 +314,20 @@
          write_on_this_pe = .false.
          read_on_this_pe = .false.
       endif
-      if(form_flag == MPP_NETCDF .AND. action_flag .NE. MPP_RDONLY) then
-         if(fileset_flag .EQ.MPP_SINGLE .AND.  threading_flag.EQ.MPP_MULTI) then
-            call mpp_error(FATAL, "mpp_io_connect.inc(mpp_open): multiple thread and single "// &
-                "file writing/appending is not supported for netCDF file")
-         endif
-         if( fileset_flag.EQ.MPP_SINGLE .AND. .NOT.on_root_pe ) then
-            write_on_this_pe = .false.
-            read_on_this_pe = .false.
-         endif   
-      endif   
-   
-      if( io_domain_exist) then
 
+      if (.not. parallel_netcdf .and. form_flag == MPP_NETCDF .and. &
+              action_flag /= MPP_RDONLY) then
+          if (fileset_flag == MPP_SINGLE .and. threading_flag == MPP_MULTI) &
+              call mpp_error(FATAL, "mpp_io_connect.inc(mpp_open): " &
+                  "multiple thread and single file writing/appending is not " &
+                  "supported for netCDF file")
+          if (fileset_flag == MPP_SINGLE .and. .not. on_root_pe) then
+              write_on_this_pe = .false.
+              read_on_this_pe = .false.
+          endif
+      endif
+
+      if (io_domain_exist) then
 !----------
 !ug support
           if (associated(io_domain)) then
@@ -305,8 +337,30 @@
               write_on_this_pe = mpp_domain_UG_is_tile_root_pe(io_domain_ug)
           endif
 !----------
-
+          if (parallel_netcdf) then
+              if (write_on_this_pe) then
+                  iowridx = mpp_pe()
+              else
+                  iowridx = -1
+              endif
+              npes = mpp_npes()
+              call mpp_alltoall(iowridx, 1, iope, 1)
+              niopes = count(iope > -1, dim=1)
+              allocate(iopelist(niopes))
+              niopes = 0
+              do idx = 0, npes - 1
+                  if (iope(idx) > -1) then
+                      niopes = niopes + 1
+                      iopelist(niopes) = iope(idx)
+                  endif
+              end do
+              totiopes = 0
+              ! TODO: Eliminate this function
+              call mpp_declare_pelist_id(iopelist, cur_iocomm, totiopes, &
+                                         "io_comm")
+          endif
       endif 
+
       if( action_flag == MPP_RDONLY) write_on_this_pe = .false.
       !get a unit number
       if( .NOT. write_on_this_pe .AND. action_flag.NE.MPP_RDONLY .AND. .NOT. io_domain_exist)then
@@ -337,9 +391,10 @@
       mpp_file(unit)%read_on_this_pe  = read_on_this_pe
       mpp_file(unit)%io_domain_exist  = io_domain_exist
       if( PRESENT(domain) ) then
-         allocate(mpp_file(unit)%domain)
-         mpp_file(unit)%domain = domain
-
+          allocate(mpp_file(unit)%domain)
+          mpp_file(unit)%domain = domain
+          ! TODO: Do not explicitly store the Communicator ID
+          mpp_file(unit)%iocomm = cur_iocomm
 !----------
 !ug support
       elseif (present(domain_ug)) then
@@ -362,6 +417,11 @@
 !      I could not find a way, so I added it into mpp_domains.
       if (present(domain)) then
           io_layout = mpp_get_io_domain_layout(domain)
+
+          if (parallel_netcdf .and. all(io_layout == [1, 1])) &
+              call mpp_error(FATAL, 'MPP_OPEN: Parallel_netcdf conficts ' &
+                                    'with iolayout (1,1).')
+
       elseif (present(domain_ug)) then
           io_layout_ug = mpp_get_io_domain_UG_layout(domain_ug)
       endif
@@ -372,7 +432,14 @@
 !----------
 !ug support
           if (present(domain) .and. io_layout(1)*io_layout(2) .gt. 1) then
-              fileset_flag = MPP_MULTI
+
+            if (parallel_netcdf) then
+                fileset_flag = MPP_SINGLE
+            else
+                fileset_flag = MPP_MULTI
+            endif
+
+            if (.not. parallel_netcdf) then
               threading_flag = MPP_MULTI
               tile_id = mpp_get_tile_id(io_domain)
               text2 = trim(text)
@@ -397,6 +464,7 @@
                       text = trim(text2)
                   endif
               endif
+            endif
           elseif (present(domain_ug) .and. io_layout_ug .gt. 1) then
               fileset_flag = MPP_MULTI
               threading_flag = MPP_MULTI
@@ -424,8 +492,10 @@
                   endif
               endif
           else
+            if (.not. parallel_netcdf) then
               fileset_flag = MPP_SINGLE
               threading_flag = MPP_SINGLE
+            endif
           endif
 !----------
 
@@ -479,7 +549,8 @@
       end if  
           
 !threading: SINGLE or MULTI
-      if( threading_flag.EQ.MPP_MULTI )then
+!ccyr
+      if(threading_flag == MPP_MULTI .and. .not. parallel_netcdf) then
 !fileset: MULTI or SINGLE (only for multi-threaded I/O
           if( fileset_flag.EQ.MPP_SINGLE )then
               if( form_flag.EQ.MPP_NETCDF .AND. act.EQ.'WRITE' ) &
@@ -532,36 +603,15 @@
       
 !open the file as specified above for various formats
       if( form_flag.EQ.MPP_NETCDF )then
-#ifdef PAR_ACCESS  
-      !adding some items for netcdf-4.... --fmi
-      if( .NOT.PRESENT(pelist)) then
-        allocate (glist(0:npes-1))
-        call mpp_get_current_pelist(glist, name, comm) 
-      end if
-      
-      !create info parts...
-      call MPI_INFO_CREATE(info, ierror)
-      
-     !F2003 convention
-     !call get_enviornment_variable('NC_BLKSZ', ncblk)
-     call GETENV( 'NC_BLKSZ', ncblk)
-     ncblk = trim(ncblk)
-     
-  
-     if (ncblk /= "") then
-      
+          if (parallel_netcdf) then
+              ! create info parts...
+              call MPI_INFO_CREATE(wrinfo, ierror)
+              call set_hint(wrinfo, 'WR')
 
-
-        call MPI_INFO_SET(info, "cb_buffer_size", ncblk, ierror)
-        call MPI_INFO_SET(info, "ind_rd_buffer_size", ncblk, ierror)
-        call MPI_INFO_SET(info, "ind_wr_buffer_size", ncblk, ierror)
-
-     else
-        call MPI_INFO_SET(info, "ind_rd_buffer_size", "16777216", ierror)
-        call MPI_INFO_SET(info, "ind_wr_buffer_size", "16777216", ierror)
-     endif
-
-#else
+              ! leave these for maintaining good parallel write performance.
+              call MPI_INFO_CREATE(rdinfo, ierror)
+              call set_hint(rdinfo, 'RD')
+          else
 !added by fmi to read NC_BLKSZ and NC_BLKSZ_filename...
 
 
@@ -600,7 +650,18 @@
 
                   if(debug) write(*,*) 'Blocksize for ', trim(mpp_file(unit)%name),' is ', fsize
                  !ends addition from fmi - oct.22.2008
-#endif
+      endif
+
+      if (io_domain_exist) then
+          if (pe .eq. mpp_root_pe()) &
+              print '(a,i4,a,2i4,a,a)', "    IO_DOMAIN_EXIST IO uses ", &
+                    totiopes, " ranks with the layout ", io_layout, &
+                    " for file ", trim(mpp_file(unit)%name)
+      else
+          if (pe .eq. mpp_root_pe()) &
+              print '(a,i4,a,a)', "IO_DOMAIN_NON_EXIST IO uses ", totiopes, &
+                    " ranks for file ", trim(mpp_file(unit)%name)
+      endif
 
 #ifdef use_netCDF
 #ifdef use_netCDF3
@@ -1044,5 +1105,55 @@ return
     
     end subroutine file_size
 
+    subroutine set_hint(info, rwtype)
+        integer, intent (inout) :: info
+        character (len=*), intent(in) :: rwtype
 
+        integer :: ierror, ihint, lenvar, ierr
+        character (len=12) :: ncblk, stpcnt, stpsze, cbnodes
+        integer, parameter :: nhints = 23
+        character (len=25) :: hint_name(nhints), hint_val(nhints), hint_in
+
+        hint_name(1) = "direct_read"
+        hint_name(2) = "direct_write"
+        hint_name(3) = "romio_lustre_co_ratio"
+        hint_name(4) = "romio_lustre_coll_threshold"
+        hint_name(5) = "romio_lustre_ds_in_coll"
+        hint_name(6) = "cb_buffer_size"
+        hint_name(7) = "romio_cb_read"
+        hint_name(8) = "romio_cb_write"
+        hint_name(9) = "cb_nodes"
+        hint_name(10) = "romio_no_indep_rw"
+        hint_name(11) = "romio_cb_pfr"
+        hint_name(12) = "romio_cb_fr_types"
+        hint_name(13) = "romio_cb_fr_alignment"
+        hint_name(14) = "romio_cb_ds_threshold"
+        hint_name(15) = "romio_cb_alltoall"
+        hint_name(16) = "ind_rd_buffer_size"
+        hint_name(17) = "ind_wr_buffer_size"
+        hint_name(18) = "romio_ds_read"
+        hint_name(19) = "romio_ds_write"
+        hint_name(20) = "cb_config_list"
+        hint_name(21) = "striping_unit"
+        hint_name(22) = "striping_factor"
+        hint_name(23) = "romio_lustre_start_iodevice"
+
+        do ihint = 1, nhints
+            call get_environment_variable( &
+                trim(hint_name(ihint))//'_'//trim(rwtype), &
+                hint_in, &
+                lenvar, &
+                ierror &
+            )
+            if (ierror == 0) then
+                call MPI_INFO_SET(info, HINT_NAME(ihint),HINT_IN,ierr)
+                if (ierr == 0) then
+                    if(mpp_pe() == mpp_root_pe()) &
+                        write (6, '(A,A,A,A,A)') rwtype, &
+                            ':SET MPIIO_HINT for ', trim(HINT_NAME(ihint)), &
+                            ' AS ', trim(HINT_IN)
+                end if
+            endif
+        end do
+    end subroutine set_hint
 
