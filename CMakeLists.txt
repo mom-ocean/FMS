@@ -17,8 +17,8 @@ else()
   message("Will assume system MPI implementation is sound. Remove mpifort from PATH to automatically configure MPI")
   set(MPI_FORTRAN_COMPILER mpifort)
   set(MPI_C_COMPILER mpicc)
-  set(CMAKE_Fortran_COMPILER mpifort)
-  set(CMAKE_C_COMPILER mpicc)
+  # set(CMAKE_Fortran_COMPILER mpifort)
+  # set(CMAKE_C_COMPILER mpicc)
 endif()
 
 message("Using Fortran: ${CMAKE_Fortran_COMPILER} and C: ${CMAKE_C_COMPILER}")
@@ -58,7 +58,7 @@ message("Using Fortran flags: ${CMAKE_Fortran_FLAGS} ${CMAKE_Fortran_FLAGS_${BUI
 
 add_definitions(-Duse_libMPI -Duse_netCDF -Duse_LARGEFILE -DSPMD -D__IFC)
 
-set(FMS_DIR "${CMAKE_SOURCE_DIR}/..")
+set(FMS_DIR "${CMAKE_SOURCE_DIR}")
 
 # FMS static library
 file(GLOB_RECURSE FMS_SOURCE LIST_DIRECTORIES false
