@@ -1,0 +1,70 @@
+cmake_minimum_required(VERSION 3.6)
+project(FMS C Fortran)
+
+# make sure that the default is a RELWITHDEBINFO
+if (NOT CMAKE_BUILD_TYPE)
+  set (CMAKE_BUILD_TYPE RELWITHDEBINFO CACHE STRING
+      "Choose the type of build, options are: Debug Release Relwithdebinfo."
+      FORCE)
+endif()
+message("Build type: " ${CMAKE_BUILD_TYPE})
+
+if (MPIFORT_EXE STREQUAL "MPIFORT_EXE-NOTFOUND")
+  message("mpifort not found, searching for MPI libraries" )
+  find_package(MPI)
+else()
+  message("mpifort executable found: " ${MPIFORT_EXE})
+  message("Will assume system MPI implementation is sound. Remove mpifort from PATH to automatically configure MPI")
+  set(MPI_FORTRAN_COMPILER mpifort)
+  set(MPI_C_COMPILER mpicc)
+  set(CMAKE_Fortran_COMPILER mpifort)
+  set(CMAKE_C_COMPILER mpicc)
+endif()
+
+message("Using Fortran: ${CMAKE_Fortran_COMPILER} and C: ${CMAKE_C_COMPILER}")
+
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fno-alias -stack_temps -safe-cray-ptr -ftz -i_dynamic -assume byterecl -i4 -r8 -nowarn -sox -traceback")
+  set(CMAKE_Fortran_FLAGS_RELEASE        "-O2 -fp-model source")
+  set(CMAKE_Fortran_FLAGS_RELWITHDEBINFO "${CMAKE_Fortran_FLAGS_RELEASE} -g")
+  set(CMAKE_Fortran_FLAGS_DEBUG          "-g -O0 -check -check noarg_temp_created -check nopointer -warn -warn noerrors -fpe0 -ftrapuv")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -fcray-pointer -fdefault-real-8 -fdefault-double-8 -Waliasing -ffree-line-length-none -fno-range-check -fbacktrace")
+  set(CMAKE_Fortran_FLAGS_RELEASE        "-O2 -fbounds-check")
+  set(CMAKE_Fortran_FLAGS_RELWITHDEBINFO "${CMAKE_Fortran_FLAGS_RELEASE} -g")
+  set(CMAKE_Fortran_FLAGS_DEBUG          "-O0 -g -W -fbounds-check -ffpe-trap=invalid,zero,overflow")
+else ()
+  message ("Unknown FORTRAN compiler default flags only...")
+endif()
+
+execute_process(COMMAND nf-config --includedir OUTPUT_VARIABLE NETCDF_INCDIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND nf-config --flibs OUTPUT_VARIABLE NETCDF_FLIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(CMAKE_Fortran_FLAGS "${CMAKE_Fortran_FLAGS} -I${NETCDF_INCDIR}")
+
+if(CMAKE_C_COMPILER_ID STREQUAL "Intel")
+  set(CMAKE_C_FLAGS         "${CMAKE_C_FLAGS} -sox -traceback") 
+  set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG} -O0 -debug")
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2 -debug minimal")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  set(CMAKE_C_FLAGS         "${CMAKE_C_FLAGS} -frecord-gcc-switches -traceback")
+  set(CMAKE_C_FLAGS_DEBUG   "${CMAKE_C_FLAGS_DEBUG} -O0 -debug")
+  set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O2 -debug minimal")
+else ()
+  message ("Unknown C compiler default flags only...")
+endif()
+
+string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+message("Using Fortran flags: ${CMAKE_Fortran_FLAGS} ${CMAKE_Fortran_FLAGS_${BUILD_TYPE}}")
+
+add_definitions(-Duse_libMPI -Duse_netCDF -Duse_LARGEFILE -DSPMD -D__IFC)
+
+set(FMS_DIR "${CMAKE_SOURCE_DIR}/..")
+
+# FMS static library
+file(GLOB_RECURSE FMS_SOURCE LIST_DIRECTORIES false
+  ${FMS_DIR}/*.[fF]90 ${FMS_DIR}/*.c)
+
+add_library(FMS ${FMS_SOURCE})
+
+target_include_directories(FMS PRIVATE
+  /usr/include ${FMS_DIR}/include ${FMS_DIR}/mosaic ${FMS_DIR}/drifters ${FMS_DIR}/fms ${FMS_DIR}/mpp/include)
