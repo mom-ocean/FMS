@@ -58,7 +58,7 @@ message("Using Fortran flags: ${CMAKE_Fortran_FLAGS} ${CMAKE_Fortran_FLAGS_${BUI
 
 add_definitions(-Duse_libMPI -Duse_netCDF -Duse_LARGEFILE -DSPMD -D__IFC)
 
-set(FMS_DIR "${CMAKE_SOURCE_DIR}")
+set(FMS_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # FMS static library
 file(GLOB_RECURSE FMS_SOURCE LIST_DIRECTORIES false
