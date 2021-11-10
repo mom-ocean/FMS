@@ -46,4 +46,4 @@ jobs:
     - name: Compile
       working-directory: ./build
       run: |
-        cmake .. && make
+        cmake .. && make -j
