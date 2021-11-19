@@ -46,4 +46,4 @@ jobs:
     - name: Compile
       working-directory: ./build
       run: |
-        cmake .. && make -j
+        cmake -DCMAKE_BUILD_TYPE=Debug .. && make -j
