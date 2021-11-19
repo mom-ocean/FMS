@@ -12,7 +12,7 @@ jobs:
       matrix:
         os: [ ubuntu-18.04, ubuntu-20.04 ] 
         # gcc_v: [8, 9] # Version of GFortran we want to use.
-        build: [Debug, Release]
+        build: [ Release, Debug ]
     runs-on: ${{ matrix.os }}
     env:
       # FC: gfortran-${{ matrix.gcc_v }}
