@@ -63,8 +63,6 @@ else ()
   message ("Unknown C compiler default flags only...")
 endif()
 
-# find_package(NetCDF)
-
 string(TOUPPER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
 message("Using Fortran flags: ${CMAKE_Fortran_FLAGS} ${CMAKE_Fortran_FLAGS_${BUILD_TYPE}}")
 message("Using C flags: ${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${BUILD_TYPE}}")
