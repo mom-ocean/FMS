@@ -97,7 +97,7 @@
   !  </TEMPLATE>
   ! </FUNCTION>
   function stdlog()
-    integer :: stdlog,istat
+    integer :: stdlog, istat, log_unit, etc_unit
     logical :: opened
     character(len=11) :: this_pe
 !$  logical           :: omp_in_parallel    
@@ -125,7 +125,7 @@
 
     if( pe.EQ.root_pe )then
        write(this_pe,'(a,i6.6,a)') '.',pe,'.out'
-       inquire( file=trim(configfile)//this_pe, opened=opened )
+       inquire( file=trim(configfile)//this_pe, opened=opened, number=log_unit )
        if( opened )then
           call FLUSH(log_unit)
        else
@@ -134,7 +134,7 @@
        end if
        stdlog = log_unit
     else
-       inquire( unit=etc_unit, opened=opened )
+       inquire( unit=etc_unit, opened=opened, number=etc_unit )
        if( opened )then
           call FLUSH(etc_unit)
        else
