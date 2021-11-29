@@ -146,11 +146,13 @@ contains
     integer, intent(in) :: y
     integer             :: temper
     
+    integer :: x
+    
     ! Tempering
-    temper = ieor(y, ishft(y, -11))
-    temper = ieor(temper, iand(ishft(temper,  7), TMASKB))
-    temper = ieor(temper, iand(ishft(temper, 15), TMASKC))
-    temper = ieor(temper, ishft(temper, -18))
+    x      = ieor(y, ishft(y, -11))
+    x      = ieor(x, iand(ishft(x,  7), TMASKB))
+    x      = ieor(x, iand(ishft(x, 15), TMASKC))
+    temper = ieor(x, ishft(x, -18))
   end function temper
   ! -------------------------------------------------------------
   ! Public (but hidden) functions
