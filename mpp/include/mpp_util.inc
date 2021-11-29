@@ -97,7 +97,7 @@
   !  </TEMPLATE>
   ! </FUNCTION>
   function stdlog()
-    integer :: stdlog, istat, log_unit, etc_unit
+    integer :: stdlog, istat
     logical :: opened
     character(len=11) :: this_pe
 !$  logical           :: omp_in_parallel    
@@ -134,7 +134,7 @@
        end if
        stdlog = log_unit
     else
-       inquire( unit=etc_unit, opened=opened, number=etc_unit )
+       inquire( unit=etc_unit, opened=opened )
        if( opened )then
           call FLUSH(etc_unit)
        else
